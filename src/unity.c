@@ -7,11 +7,25 @@
 
 #include "unity.h"
 
-static IUnityInterfaces* UnityInterfaces = NULL;
-static IUnityGraphics* UnityGraphics = NULL;
+typedef struct unity_shared_texture_internal
+{
+    shared_texture SharedTexture;
+    union
+    {
+        vk_shared_texture Vulkan;
+        gl_shared_texture OpenGL;
+    };
+} unity_shared_texture_internal;
 
 static uint32_t GlobalSharedTextureCount = 0;
-static vk_shared_texture **GlobalSharedTextures = NULL;
+static unity_shared_texture_internal **GlobalSharedTextures = NULL;
+
+//
+//
+//
+
+static IUnityInterfaces* UnityInterfaces = NULL;
+static IUnityGraphics* UnityGraphics = NULL;
 
 static VkResult UnityHook_VkQueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSubmits, VkFence fence)
 {
@@ -32,9 +46,9 @@ static VkResult UnityHook_VkQueueSubmit(VkQueue queue, uint32_t submitCount, con
 
         for (uint32_t j = 0; j < GlobalSharedTextureCount; ++j)
         {
-            WaitSemaphores[pSubmits[i].waitSemaphoreCount + j] = GlobalSharedTextures[j]->Semaphore;
+            WaitSemaphores[pSubmits[i].waitSemaphoreCount + j] = GlobalSharedTextures[j]->Vulkan.Semaphore;
             WaitDstStageMask[pSubmits[i].waitSemaphoreCount + j] = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-            SignalSemaphores[pSubmits[i].signalSemaphoreCount + j] = GlobalSharedTextures[j]->Semaphore;
+            SignalSemaphores[pSubmits[i].signalSemaphoreCount + j] = GlobalSharedTextures[j]->Vulkan.Semaphore;
         }
 
         SubmitInfos[i].pWaitSemaphores = WaitSemaphores;
@@ -128,31 +142,6 @@ static PFN_vkGetInstanceProcAddr UNITY_INTERFACE_API Unity_VulkanInitCallback(PF
     return UnityHook_getInstanceProcAddr;
 }
 
-static void UNITY_INTERFACE_API UnityVulkan_OnGraphicsDeviceEvent(UnityGfxDeviceEventType EventType)
-{
-    if (EventType == kUnityGfxDeviceEventInitialize)
-    {
-    }
-
-    if (EventType == kUnityGfxDeviceEventShutdown)
-    {
-        if (GlobalSharedTextureCount)
-        {
-            IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
-            UnityVulkanInstance Instance = UnityVulkan->Instance();
-
-            for (uint32_t i = 0; i < GlobalSharedTextureCount; ++i)
-            {
-                SharedTexture_DestroyVulkanTexture(*GlobalSharedTextures[i], Instance.device);
-                free(GlobalSharedTextures[i]);
-            }
-            free(GlobalSharedTextures);
-            GlobalSharedTextureCount = 0;
-            GlobalSharedTextures = NULL;
-        }
-    }
-}
-
 //
 //
 //
@@ -200,58 +189,109 @@ static void UNITY_INTERFACE_API UnityOpenGL_OnGraphicsDeviceEvent(UnityGfxDevice
 //
 //
 
+static void UNITY_INTERFACE_API Unity_OnGraphicsDeviceEvent(UnityGfxDeviceEventType EventType)
+{
+    if (EventType == kUnityGfxDeviceEventInitialize)
+    {
+        switch(UnityGraphics->GetRenderer())
+        {
+            case kUnityGfxRendererOpenGLCore:
+            {
+                UnityOpenGL_LoadFuncs();
+            } break;
+        }
+    }
+
+    if (EventType == kUnityGfxDeviceEventShutdown)
+    {
+        switch(UnityGraphics->GetRenderer())
+        {
+            case kUnityGfxRendererOpenGLCore:
+            {
+                UnityOpenGL_LoadFuncs();
+            } break;
+        }
+
+        if (GlobalSharedTextureCount)
+        {
+            for (uint32_t i = 0; i < GlobalSharedTextureCount; ++i)
+            {
+                switch(UnityGraphics->GetRenderer())
+                {
+                    case kUnityGfxRendererVulkan:
+                    {
+                        IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
+                        UnityVulkanInstance Instance = UnityVulkan->Instance();
+                        SharedTexture_DestroyVulkanTexture(GlobalSharedTextures[i]->Vulkan, Instance.device);
+                    } break;
+
+                    case kUnityGfxRendererOpenGLCore:
+                    {
+                        SharedTexture_DestroyOpenGLTexture(GlobalSharedTextures[i]->OpenGL);
+                    } break;
+                }
+
+                free(GlobalSharedTextures[i]);
+            }
+            free(GlobalSharedTextures);
+            GlobalSharedTextureCount = 0;
+            GlobalSharedTextures = NULL;
+        }
+    }
+}
+
 void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces* Interfaces)
 {
     SharedTexture_Init();
 
     UnityInterfaces = Interfaces;
     UnityGraphics = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphics);
+    UnityGraphics->RegisterDeviceEventCallback(Unity_OnGraphicsDeviceEvent);
     
     switch(UnityGraphics->GetRenderer())
     {
         case kUnityGfxRendererVulkan:
         {
-            UnityGraphics->RegisterDeviceEventCallback(UnityVulkan_OnGraphicsDeviceEvent);
             IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
             UnityVulkan->InterceptInitialization(Unity_VulkanInitCallback, 0);
-        } break;
-
-        case kUnityGfxRendererOpenGLCore:
-        {
-            UnityGraphics->RegisterDeviceEventCallback(UnityOpenGL_OnGraphicsDeviceEvent);
         } break;
     }
 }
 
 void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload(void)
 {
-    switch(UnityGraphics->GetRenderer())
-    {
-        case kUnityGfxRendererVulkan:
-        {
-            UnityGraphics->UnregisterDeviceEventCallback(UnityVulkan_OnGraphicsDeviceEvent);
-        } break;
-
-        case kUnityGfxRendererOpenGLCore:
-        {
-            UnityGraphics->UnregisterDeviceEventCallback(UnityOpenGL_OnGraphicsDeviceEvent);
-        } break;
-    }
+    UnityGraphics->UnregisterDeviceEventCallback(Unity_OnGraphicsDeviceEvent);
 }
 
 unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedTexture(const char *Name, int32_t Width, int32_t Height, uint32_t Format)
 {
+    void *NativeTex = 0;
     shared_texture SharedTexture = SharedTexture_OpenOrCreate(Name, Width, Height, Format);
 
-    IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
-    UnityVulkanInstance Instance = UnityVulkan->Instance();
-    GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(vk_shared_texture*) * (++GlobalSharedTextureCount));
-    vk_shared_texture *VkSharedTexture = malloc(sizeof(vk_shared_texture));
-    *VkSharedTexture = SharedTexture_ToVulkan(SharedTexture, Instance.device, Instance.physicalDevice);
-    GlobalSharedTextures[GlobalSharedTextureCount-1] = VkSharedTexture;
+    GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(unity_shared_texture_internal *) * (++GlobalSharedTextureCount));
+    unity_shared_texture_internal *UnitySharedTexture = malloc(sizeof(unity_shared_texture_internal));
+    UnitySharedTexture->SharedTexture = SharedTexture;
+    GlobalSharedTextures[GlobalSharedTextureCount-1] = UnitySharedTexture;
+
+    switch(UnityGraphics->GetRenderer())
+    {
+        case kUnityGfxRendererVulkan:
+        {
+            IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
+            UnityVulkanInstance Instance = UnityVulkan->Instance();
+            UnitySharedTexture->Vulkan = SharedTexture_ToVulkan(SharedTexture, Instance.device, Instance.physicalDevice);
+            NativeTex = &UnitySharedTexture->Vulkan.Image;
+        } break;
+
+        case kUnityGfxRendererOpenGLCore:
+        {
+            UnitySharedTexture->OpenGL = SharedTexture_ToOpenGL(SharedTexture);
+            NativeTex = &UnitySharedTexture->OpenGL.Texture;
+        } break;
+    }
 
     return (unity_shared_texture) {
-        .NativeTex = &VkSharedTexture->Image,
+        .NativeTex = NativeTex,
         .Format = SharedTexture.Format,
         .Width = SharedTexture.Width,
         .Height = SharedTexture.Height,
@@ -260,21 +300,32 @@ unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedText
 
 void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API DestroySharedTexture(unity_shared_texture SharedTexture)
 {
-    IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
-    UnityVulkanInstance Instance = UnityVulkan->Instance();
-    
     for (uint32_t i = 0; i < GlobalSharedTextureCount; ++i)
     {
-        if (GlobalSharedTextures[i]->Image != SharedTexture.NativeTex)
-            continue;
+        switch(UnityGraphics->GetRenderer())
+        {
+            case kUnityGfxRendererVulkan:
+            {
+                if (&GlobalSharedTextures[i]->Vulkan.Image != SharedTexture.NativeTex)
+                    continue;
+                IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
+                UnityVulkanInstance Instance = UnityVulkan->Instance();
+                SharedTexture_DestroyVulkanTexture(GlobalSharedTextures[i]->Vulkan, Instance.device);
+            } break;
 
-        SharedTexture_DestroyVulkanTexture(*GlobalSharedTextures[i], Instance.device);
+            case kUnityGfxRendererOpenGLCore:
+            {
+                if (&GlobalSharedTextures[i]->OpenGL.Texture != SharedTexture.NativeTex)
+                    continue;
+                SharedTexture_DestroyOpenGLTexture(GlobalSharedTextures[i]->OpenGL);
+            } break;
+        }
+        
         free(GlobalSharedTextures[i]);
 
         if (--GlobalSharedTextureCount)
         {
-            for (uint32_t j = i; j < GlobalSharedTextureCount; ++j)
-                GlobalSharedTextures[j] = GlobalSharedTextures[j + 1];
+            GlobalSharedTextures[i] = GlobalSharedTextures[GlobalSharedTextureCount];
             GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(vk_shared_texture*) * (GlobalSharedTextureCount));
         }
         else
