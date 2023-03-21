@@ -9,7 +9,6 @@
 
 static IUnityInterfaces* UnityInterfaces = NULL;
 static IUnityGraphics* UnityGraphics = NULL;
-static IUnityGraphicsVulkanV2 *UnityVulkan = NULL;
 
 static uint32_t GlobalSharedTextureCount = 0;
 static vk_shared_texture **GlobalSharedTextures = NULL;
@@ -129,7 +128,7 @@ static PFN_vkGetInstanceProcAddr UNITY_INTERFACE_API Unity_VulkanInitCallback(PF
     return UnityHook_getInstanceProcAddr;
 }
 
-static void UNITY_INTERFACE_API Unity_OnGraphicsDeviceEvent(UnityGfxDeviceEventType EventType)
+static void UNITY_INTERFACE_API UnityVulkan_OnGraphicsDeviceEvent(UnityGfxDeviceEventType EventType)
 {
     if (EventType == kUnityGfxDeviceEventInitialize)
     {
@@ -139,6 +138,7 @@ static void UNITY_INTERFACE_API Unity_OnGraphicsDeviceEvent(UnityGfxDeviceEventT
     {
         if (GlobalSharedTextureCount)
         {
+            IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
             UnityVulkanInstance Instance = UnityVulkan->Instance();
 
             for (uint32_t i = 0; i < GlobalSharedTextureCount; ++i)
@@ -153,30 +153,98 @@ static void UNITY_INTERFACE_API Unity_OnGraphicsDeviceEvent(UnityGfxDeviceEventT
     }
 }
 
+//
+//
+//
+
+HMODULE OpenGL32DLL;
+
+static void UnityOpenGL_LoadFuncs(void)
+{
+    OpenGL32DLL = LoadLibraryA("opengl32.dll");    
+
+    glCreateMemoryObjectsEXT = (PFNGLCREATEMEMORYOBJECTSEXTPROC)GetProcAddress(OpenGL32DLL, "glCreateMemoryObjectsEXT");
+    glImportMemoryWin32HandleEXT = (PFNGLIMPORTMEMORYWIN32HANDLEEXTPROC)GetProcAddress(OpenGL32DLL, "glImportMemoryWin32HandleEXT");
+    glImportMemoryFdEXT = (PFNGLIMPORTMEMORYFDEXTPROC)GetProcAddress(OpenGL32DLL, "glImportMemoryFdEXT");
+    glCreateTextures = (PFNGLCREATETEXTURESPROC)GetProcAddress(OpenGL32DLL, "glCreateTextures");
+    glTextureParameteri = (PFNGLTEXTUREPARAMETERIPROC)GetProcAddress(OpenGL32DLL, "glTextureParameteri");
+    glTextureStorageMem2DEXT = (PFNGLTEXTURESTORAGEMEM2DEXTPROC)GetProcAddress(OpenGL32DLL, "glTextureStorageMem2DEXT");
+    glGenSemaphoresEXT = (PFNGLGENSEMAPHORESEXTPROC)GetProcAddress(OpenGL32DLL, "glGenSemaphoresEXT");
+    glImportSemaphoreWin32HandleEXT = (PFNGLIMPORTSEMAPHOREWIN32HANDLEEXTPROC)GetProcAddress(OpenGL32DLL, "glImportSemaphoreWin32HandleEXT");
+    glImportSemaphoreFdEXT = (PFNGLIMPORTSEMAPHOREFDEXTPROC)GetProcAddress(OpenGL32DLL, "glImportSemaphoreFdEXT");
+    glDeleteMemoryObjectsEXT = (PFNGLDELETEMEMORYOBJECTSEXTPROC)GetProcAddress(OpenGL32DLL, "glDeleteMemoryObjectsEXT");
+    glDeleteSemaphoresEXT = (PFNGLDELETESEMAPHORESEXTPROC)GetProcAddress(OpenGL32DLL, "glDeleteSemaphoresEXT");
+    glWaitSemaphoreEXT = (PFNGLWAITSEMAPHOREEXTPROC)GetProcAddress(OpenGL32DLL, "glWaitSemaphoreEXT");
+    glSignalSemaphoreEXT = (PFNGLSIGNALSEMAPHOREEXTPROC)GetProcAddress(OpenGL32DLL, "glSignalSemaphoreEXT");
+}
+
+static void UnityOpenGL_UnloadFuncs(void)
+{    
+    FreeLibrary(OpenGL32DLL);
+}
+
+static void UNITY_INTERFACE_API UnityOpenGL_OnGraphicsDeviceEvent(UnityGfxDeviceEventType EventType)
+{
+    if (EventType == kUnityGfxDeviceEventInitialize)
+    {
+        UnityOpenGL_LoadFuncs();
+    }
+
+    if (EventType == kUnityGfxDeviceEventShutdown)
+    {
+        UnityOpenGL_UnloadFuncs();
+    }
+}
+
+//
+//
+//
+
 void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces* Interfaces)
 {
     SharedTexture_Init();
 
     UnityInterfaces = Interfaces;
     UnityGraphics = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphics);
-    UnityGraphics->RegisterDeviceEventCallback(Unity_OnGraphicsDeviceEvent);
-    UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
-    bool Success = UnityVulkan->InterceptInitialization(Unity_VulkanInitCallback, 0);
-
-    if (UnityGraphics->GetRenderer() == kUnityGfxRendererVulkan)
+    
+    switch(UnityGraphics->GetRenderer())
     {
+        case kUnityGfxRendererVulkan:
+        {
+            UnityGraphics->RegisterDeviceEventCallback(UnityVulkan_OnGraphicsDeviceEvent);
+            IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
+            UnityVulkan->InterceptInitialization(Unity_VulkanInitCallback, 0);
+        } break;
+
+        case kUnityGfxRendererOpenGLCore:
+        {
+            UnityGraphics->RegisterDeviceEventCallback(UnityOpenGL_OnGraphicsDeviceEvent);
+        } break;
     }
 }
 
-void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload()
+void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload(void)
 {
-    UnityGraphics->UnregisterDeviceEventCallback(Unity_OnGraphicsDeviceEvent);
+    switch(UnityGraphics->GetRenderer())
+    {
+        case kUnityGfxRendererVulkan:
+        {
+            UnityGraphics->UnregisterDeviceEventCallback(UnityVulkan_OnGraphicsDeviceEvent);
+        } break;
+
+        case kUnityGfxRendererOpenGLCore:
+        {
+            UnityGraphics->UnregisterDeviceEventCallback(UnityOpenGL_OnGraphicsDeviceEvent);
+        } break;
+    }
 }
 
 unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedTexture(const char *Name, int32_t Width, int32_t Height, uint32_t Format)
 {
-    UnityVulkanInstance Instance = UnityVulkan->Instance();
     shared_texture SharedTexture = SharedTexture_OpenOrCreate(Name, Width, Height, Format);
+
+    IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
+    UnityVulkanInstance Instance = UnityVulkan->Instance();
     GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(vk_shared_texture*) * (++GlobalSharedTextureCount));
     vk_shared_texture *VkSharedTexture = malloc(sizeof(vk_shared_texture));
     *VkSharedTexture = SharedTexture_ToVulkan(SharedTexture, Instance.device, Instance.physicalDevice);
@@ -192,6 +260,7 @@ unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedText
 
 void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API DestroySharedTexture(unity_shared_texture SharedTexture)
 {
+    IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
     UnityVulkanInstance Instance = UnityVulkan->Instance();
     
     for (uint32_t i = 0; i < GlobalSharedTextureCount; ++i)

@@ -307,3 +307,43 @@ static void SharedTexture_DestroyVulkanTexture(vk_shared_texture VKSharedTexture
 }
 
 #endif // defined(SHARED_TEXTURE_VULKAN)
+
+#if defined(SHARED_TEXTURE_DIRECTX)
+
+#error direct3D not implemented!
+
+#include <d3d11.h>
+
+typedef struct dx_shared_texture
+{
+    ID3D11Texture2D* Texture;
+};
+
+static dx_shared_texture SharedTexture_ToDirectX(shared_texture SharedTexture, ID3D11Device *Device)
+{
+    IDXGIResource *Memory;
+    Device->OpenSharedResource(SharedTexture.Win32.MemoryHandle, __uuidof(IDXGIResource), (void **)&Memory);
+
+    D3D11_TEXTURE2D_DESC Desc;
+    Desc.Width = SharedTexture.Width;
+    Desc.Height = SharedTexture.Height;
+    Desc.MipLevels = 1;
+    Desc.ArraySize = 1;
+    Desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    Desc.SampleDesc.Count = 1;
+    Desc.Usage = D3D11_USAGE_DYNAMIC;
+    Desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    Desc.CPUAccessFlags = 0;
+    Desc.MiscFlags = 0;
+
+    ID3D11Texture2D *Texture = NULL;
+    Device->CreateTexture2D(&Desc, NULL, &Texture);
+    Texture->QueryInterface(__uuidof(IDXGIResource), (void **)&Memory)
+    Memory->Release(); 
+
+    dx_shared_texture DXSharedTexture;
+    DXSharedTexture.Texture = Texture;
+    return DXSharedTexture;
+}
+
+#endif // defined(SHARED_TEXTURE_DIRECTX)
