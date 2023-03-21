@@ -146,43 +146,37 @@ static PFN_vkGetInstanceProcAddr UNITY_INTERFACE_API Unity_VulkanInitCallback(PF
 //
 //
 
-HMODULE OpenGL32DLL;
+static HMODULE OpenGL32DLL;
+
+static void *UnityOpenGL_LoadFunc(const char *Name)
+{
+    void *Func = wglGetProcAddress(Name);
+    if (Func) return Func; 
+    return GetProcAddress(OpenGL32DLL, Name);
+}
 
 static void UnityOpenGL_LoadFuncs(void)
 {
-    OpenGL32DLL = LoadLibraryA("opengl32.dll");    
+    OpenGL32DLL = LoadLibraryA("opengl32.dll");
 
-    glCreateMemoryObjectsEXT = (PFNGLCREATEMEMORYOBJECTSEXTPROC)GetProcAddress(OpenGL32DLL, "glCreateMemoryObjectsEXT");
-    glImportMemoryWin32HandleEXT = (PFNGLIMPORTMEMORYWIN32HANDLEEXTPROC)GetProcAddress(OpenGL32DLL, "glImportMemoryWin32HandleEXT");
-    glImportMemoryFdEXT = (PFNGLIMPORTMEMORYFDEXTPROC)GetProcAddress(OpenGL32DLL, "glImportMemoryFdEXT");
-    glCreateTextures = (PFNGLCREATETEXTURESPROC)GetProcAddress(OpenGL32DLL, "glCreateTextures");
-    glTextureParameteri = (PFNGLTEXTUREPARAMETERIPROC)GetProcAddress(OpenGL32DLL, "glTextureParameteri");
-    glTextureStorageMem2DEXT = (PFNGLTEXTURESTORAGEMEM2DEXTPROC)GetProcAddress(OpenGL32DLL, "glTextureStorageMem2DEXT");
-    glGenSemaphoresEXT = (PFNGLGENSEMAPHORESEXTPROC)GetProcAddress(OpenGL32DLL, "glGenSemaphoresEXT");
-    glImportSemaphoreWin32HandleEXT = (PFNGLIMPORTSEMAPHOREWIN32HANDLEEXTPROC)GetProcAddress(OpenGL32DLL, "glImportSemaphoreWin32HandleEXT");
-    glImportSemaphoreFdEXT = (PFNGLIMPORTSEMAPHOREFDEXTPROC)GetProcAddress(OpenGL32DLL, "glImportSemaphoreFdEXT");
-    glDeleteMemoryObjectsEXT = (PFNGLDELETEMEMORYOBJECTSEXTPROC)GetProcAddress(OpenGL32DLL, "glDeleteMemoryObjectsEXT");
-    glDeleteSemaphoresEXT = (PFNGLDELETESEMAPHORESEXTPROC)GetProcAddress(OpenGL32DLL, "glDeleteSemaphoresEXT");
-    glWaitSemaphoreEXT = (PFNGLWAITSEMAPHOREEXTPROC)GetProcAddress(OpenGL32DLL, "glWaitSemaphoreEXT");
-    glSignalSemaphoreEXT = (PFNGLSIGNALSEMAPHOREEXTPROC)GetProcAddress(OpenGL32DLL, "glSignalSemaphoreEXT");
+    glCreateMemoryObjectsEXT = (PFNGLCREATEMEMORYOBJECTSEXTPROC)UnityOpenGL_LoadFunc("glCreateMemoryObjectsEXT");
+    glImportMemoryWin32HandleEXT = (PFNGLIMPORTMEMORYWIN32HANDLEEXTPROC)UnityOpenGL_LoadFunc("glImportMemoryWin32HandleEXT");
+    glImportMemoryFdEXT = (PFNGLIMPORTMEMORYFDEXTPROC)UnityOpenGL_LoadFunc("glImportMemoryFdEXT");
+    glCreateTextures = (PFNGLCREATETEXTURESPROC)UnityOpenGL_LoadFunc("glCreateTextures");
+    glTextureParameteri = (PFNGLTEXTUREPARAMETERIPROC)UnityOpenGL_LoadFunc("glTextureParameteri");
+    glTextureStorageMem2DEXT = (PFNGLTEXTURESTORAGEMEM2DEXTPROC)UnityOpenGL_LoadFunc("glTextureStorageMem2DEXT");
+    glGenSemaphoresEXT = (PFNGLGENSEMAPHORESEXTPROC)UnityOpenGL_LoadFunc("glGenSemaphoresEXT");
+    glImportSemaphoreWin32HandleEXT = (PFNGLIMPORTSEMAPHOREWIN32HANDLEEXTPROC)UnityOpenGL_LoadFunc("glImportSemaphoreWin32HandleEXT");
+    glImportSemaphoreFdEXT = (PFNGLIMPORTSEMAPHOREFDEXTPROC)UnityOpenGL_LoadFunc("glImportSemaphoreFdEXT");
+    glDeleteMemoryObjectsEXT = (PFNGLDELETEMEMORYOBJECTSEXTPROC)UnityOpenGL_LoadFunc("glDeleteMemoryObjectsEXT");
+    glDeleteSemaphoresEXT = (PFNGLDELETESEMAPHORESEXTPROC)UnityOpenGL_LoadFunc("glDeleteSemaphoresEXT");
+    glWaitSemaphoreEXT = (PFNGLWAITSEMAPHOREEXTPROC)UnityOpenGL_LoadFunc("glWaitSemaphoreEXT");
+    glSignalSemaphoreEXT = (PFNGLSIGNALSEMAPHOREEXTPROC)UnityOpenGL_LoadFunc("glSignalSemaphoreEXT");
 }
 
 static void UnityOpenGL_UnloadFuncs(void)
 {    
     FreeLibrary(OpenGL32DLL);
-}
-
-static void UNITY_INTERFACE_API UnityOpenGL_OnGraphicsDeviceEvent(UnityGfxDeviceEventType EventType)
-{
-    if (EventType == kUnityGfxDeviceEventInitialize)
-    {
-        UnityOpenGL_LoadFuncs();
-    }
-
-    if (EventType == kUnityGfxDeviceEventShutdown)
-    {
-        UnityOpenGL_UnloadFuncs();
-    }
 }
 
 //
@@ -193,13 +187,6 @@ static void UNITY_INTERFACE_API Unity_OnGraphicsDeviceEvent(UnityGfxDeviceEventT
 {
     if (EventType == kUnityGfxDeviceEventInitialize)
     {
-        switch(UnityGraphics->GetRenderer())
-        {
-            case kUnityGfxRendererOpenGLCore:
-            {
-                UnityOpenGL_LoadFuncs();
-            } break;
-        }
     }
 
     if (EventType == kUnityGfxDeviceEventShutdown)
@@ -208,7 +195,7 @@ static void UNITY_INTERFACE_API Unity_OnGraphicsDeviceEvent(UnityGfxDeviceEventT
         {
             case kUnityGfxRendererOpenGLCore:
             {
-                UnityOpenGL_LoadFuncs();
+                UnityOpenGL_UnloadFuncs();
             } break;
         }
 
@@ -255,6 +242,11 @@ void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces
             IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
             UnityVulkan->InterceptInitialization(Unity_VulkanInitCallback, 0);
         } break;
+
+        case kUnityGfxRendererOpenGLCore:
+        {
+            UnityOpenGL_LoadFuncs();
+        } break;
     }
 }
 
@@ -286,7 +278,7 @@ unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedText
         case kUnityGfxRendererOpenGLCore:
         {
             UnitySharedTexture->OpenGL = SharedTexture_ToOpenGL(SharedTexture);
-            NativeTex = &UnitySharedTexture->OpenGL.Texture;
+            NativeTex = UnitySharedTexture->OpenGL.Texture;
         } break;
     }
 
@@ -315,7 +307,7 @@ void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API DestroySharedTexture(unity_share
 
             case kUnityGfxRendererOpenGLCore:
             {
-                if (&GlobalSharedTextures[i]->OpenGL.Texture != SharedTexture.NativeTex)
+                if (GlobalSharedTextures[i]->OpenGL.Texture != SharedTexture.NativeTex)
                     continue;
                 SharedTexture_DestroyOpenGLTexture(GlobalSharedTextures[i]->OpenGL);
             } break;
