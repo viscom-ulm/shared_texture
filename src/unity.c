@@ -9,6 +9,7 @@
 
 typedef struct unity_shared_texture_internal
 {
+    void *NativeTex;
     shared_texture SharedTexture;
     union
     {
@@ -187,6 +188,13 @@ static void UNITY_INTERFACE_API Unity_OnGraphicsDeviceEvent(UnityGfxDeviceEventT
 {
     if (EventType == kUnityGfxDeviceEventInitialize)
     {
+        switch(UnityGraphics->GetRenderer())
+        {
+            case kUnityGfxRendererOpenGLCore:
+            {
+                UnityOpenGL_LoadFuncs();
+            } break;
+        }
     }
 
     if (EventType == kUnityGfxDeviceEventShutdown)
@@ -245,7 +253,6 @@ void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces
 
         case kUnityGfxRendererOpenGLCore:
         {
-            UnityOpenGL_LoadFuncs();
         } break;
     }
 }
@@ -257,13 +264,38 @@ void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload(void)
 
 unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedTexture(const char *Name, int32_t Width, int32_t Height, uint32_t Format)
 {
-    void *NativeTex = 0;
     shared_texture SharedTexture = SharedTexture_OpenOrCreate(Name, Width, Height, Format);
 
-    GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(unity_shared_texture_internal *) * (++GlobalSharedTextureCount));
+    int32_t Id = -1;
+    for (uint32_t i = 0; i < GlobalSharedTextureCount; ++i)
+    {
+        if (GlobalSharedTextures[i] == 0)
+        {
+            Id = i;
+            break;
+        }
+    }
+    if (Id == -1)
+    {
+        Id = GlobalSharedTextureCount++;
+        GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(unity_shared_texture_internal *) * (GlobalSharedTextureCount));
+    }
+
     unity_shared_texture_internal *UnitySharedTexture = malloc(sizeof(unity_shared_texture_internal));
-    GlobalSharedTextures[GlobalSharedTextureCount - 1] = UnitySharedTexture;
+    GlobalSharedTextures[Id] = UnitySharedTexture;
     UnitySharedTexture->SharedTexture = SharedTexture;
+
+    return (unity_shared_texture) {
+        .Id = Id,
+        .Format = SharedTexture.Format,
+        .Width = SharedTexture.Width,
+        .Height = SharedTexture.Height,
+    };
+}
+
+static void UNITY_INTERFACE_API LoadSharedTexture(int eventid)
+{
+    unity_shared_texture_internal *UnitySharedTexture = GlobalSharedTextures[eventid];
 
     switch(UnityGraphics->GetRenderer())
     {
@@ -271,60 +303,47 @@ unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedText
         {
             IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
             UnityVulkanInstance Instance = UnityVulkan->Instance();
-            UnitySharedTexture->Vulkan = SharedTexture_ToVulkan(SharedTexture, Instance.device, Instance.physicalDevice);
-            NativeTex = &UnitySharedTexture->Vulkan.Image;
+            UnitySharedTexture->Vulkan = SharedTexture_ToVulkan(UnitySharedTexture->SharedTexture, Instance.device, Instance.physicalDevice);
         } break;
 
         case kUnityGfxRendererOpenGLCore:
         {
-            UnitySharedTexture->OpenGL = SharedTexture_ToOpenGL(SharedTexture);
-            NativeTex = (void *)(intptr_t)UnitySharedTexture->OpenGL.Texture;
+            GLuint GLTexture = (GLuint)(intptr_t)UnitySharedTexture->NativeTex;
+            UnitySharedTexture->OpenGL = SharedTexture_ToOpenGL(UnitySharedTexture->SharedTexture);
+        } break;
+    }
+}
+
+static void UNITY_INTERFACE_API DestroySharedTexture(int eventid)
+{
+    unity_shared_texture_internal *UnitySharedTexture = GlobalSharedTextures[eventid];
+    GlobalSharedTextures[eventid] = 0;
+
+    switch(UnityGraphics->GetRenderer())
+    {
+        case kUnityGfxRendererVulkan:
+        {
+            IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
+            UnityVulkanInstance Instance = UnityVulkan->Instance();
+            SharedTexture_DestroyVulkanTexture(UnitySharedTexture->Vulkan, Instance.device);
+        } break;
+
+        case kUnityGfxRendererOpenGLCore:
+        {
+            SharedTexture_DestroyOpenGLTexture(UnitySharedTexture->OpenGL);
         } break;
     }
 
-    return (unity_shared_texture) {
-        .NativeTex = NativeTex,
-        .Format = SharedTexture.Format,
-        .Width = SharedTexture.Width,
-        .Height = SharedTexture.Height,
-    };
+    SharedTexture_Close(UnitySharedTexture->SharedTexture);
+    free(UnitySharedTexture);
 }
 
-void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API DestroySharedTexture(unity_shared_texture SharedTexture)
+UnityRenderingEvent UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API GetLoadSharedTextureFunc()
 {
-    for (uint32_t i = 0; i < GlobalSharedTextureCount; ++i)
-    {
-        switch(UnityGraphics->GetRenderer())
-        {
-            case kUnityGfxRendererVulkan:
-            {
-                if (&GlobalSharedTextures[i]->Vulkan.Image != SharedTexture.NativeTex)
-                    continue;
-                IUnityGraphicsVulkanV2 *UnityVulkan = UNITY_GET_INTERFACE(UnityInterfaces, IUnityGraphicsVulkanV2);
-                UnityVulkanInstance Instance = UnityVulkan->Instance();
-                SharedTexture_DestroyVulkanTexture(GlobalSharedTextures[i]->Vulkan, Instance.device);
-            } break;
+    return LoadSharedTexture;
+}
 
-            case kUnityGfxRendererOpenGLCore:
-            {
-                if ((void*)(intptr_t)GlobalSharedTextures[i]->OpenGL.Texture != SharedTexture.NativeTex)
-                    continue;
-                SharedTexture_DestroyOpenGLTexture(GlobalSharedTextures[i]->OpenGL);
-            } break;
-        }
-        
-        free(GlobalSharedTextures[i]);
-
-        if (--GlobalSharedTextureCount)
-        {
-            GlobalSharedTextures[i] = GlobalSharedTextures[GlobalSharedTextureCount];
-            GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(vk_shared_texture*) * (GlobalSharedTextureCount));
-        }
-        else
-        {
-            free(GlobalSharedTextures);
-            GlobalSharedTextures = NULL;
-        }
-        break;
-    }
+UnityRenderingEvent UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API GetDestroySharedTextureFunc()
+{
+    return DestroySharedTexture;
 }

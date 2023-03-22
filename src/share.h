@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <malloc.h>
 #include <assert.h>
+#include <stdio.h>
 
 typedef enum shared_texture_format
 {

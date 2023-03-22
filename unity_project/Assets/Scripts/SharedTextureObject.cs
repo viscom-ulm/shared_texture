@@ -11,12 +11,12 @@ public class SharedTextureObject : MonoBehaviour
 
     private void Start()
     {
+        sharedTexture = new SharedTexture("demo", 1920, 1080, TextureFormat.RGBA32);
         gameObject.GetComponent<Renderer>().material.SetTexture("_MainTex", sharedTexture.texture);
     }
 
     void OnEnable()
     {
-        sharedTexture = new SharedTexture("demo", 1920, 1080, TextureFormat.RGBA32);
     }
 
     private void OnDisable()

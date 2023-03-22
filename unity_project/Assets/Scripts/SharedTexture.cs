@@ -19,7 +19,7 @@ public class SharedTexture
     [StructLayout(LayoutKind.Sequential)]
     public readonly struct SharedTextureStruct
     {
-        public readonly IntPtr nativeTex;
+        public readonly int id;
         public readonly uint format;
         public readonly int width, height;
     }
@@ -28,15 +28,12 @@ public class SharedTexture
     private static extern SharedTextureStruct CreateSharedTexture(string Name, int width, int height, SharedTextureFormat format);
 
     [DllImport("shared_texture")]
-    private static extern void DestroySharedTexture(SharedTextureStruct sharedTexture);
+    private static extern IntPtr GetAttachSharedTextureFunc();
 
-    [RuntimeInitializeOnLoadMethod]
-    private static void Initialize()
-    {        
-        // GL.IssuePluginEvent()
-    }
+    [DllImport("shared_texture")]
+    private static extern IntPtr GetDestroySharedTextureFunc();
 
-private SharedTextureStruct sharedTexture;
+    private SharedTextureStruct sharedTexture;
     public Texture2D texture;
 
     private TextureFormat ToUnityTextureFormat(SharedTextureFormat format)
@@ -59,16 +56,16 @@ private SharedTextureStruct sharedTexture;
         return SharedTextureFormat.SHARED_TEXTURE_NONE;
     }
 
-    public SharedTexture(string Name, int width, int height, TextureFormat format)
+    public SharedTexture(string name, int width, int height, TextureFormat format)
     {
-        SharedTextureFormat sharedFormat = FromUnityTextureFormat(format);
-        sharedTexture = CreateSharedTexture(Name, width, height, sharedFormat);
-        TextureFormat textureFormat = ToUnityTextureFormat((SharedTextureFormat)sharedTexture.format);
-        texture = Texture2D.CreateExternalTexture(sharedTexture.width, sharedTexture.height, textureFormat, false, false, sharedTexture.nativeTex);
+        texture = new Texture2D(width, height, format, false);
+        SharedTextureFormat sharedFormat = FromUnityTextureFormat(texture.format);
+        sharedTexture = CreateSharedTexture(name, texture.width, texture.height, sharedFormat);
+        GL.IssuePluginEvent(GetAttachSharedTextureFunc(), sharedTexture.id);
     }
 
     ~SharedTexture()
     {
-        DestroySharedTexture(sharedTexture);
+        GL.IssuePluginEvent(GetDestroySharedTextureFunc(), sharedTexture.id);
     }
 }
