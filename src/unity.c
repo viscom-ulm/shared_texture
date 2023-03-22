@@ -262,8 +262,8 @@ unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedText
 
     GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(unity_shared_texture_internal *) * (++GlobalSharedTextureCount));
     unity_shared_texture_internal *UnitySharedTexture = malloc(sizeof(unity_shared_texture_internal));
+    GlobalSharedTextures[GlobalSharedTextureCount - 1] = UnitySharedTexture;
     UnitySharedTexture->SharedTexture = SharedTexture;
-    GlobalSharedTextures[GlobalSharedTextureCount-1] = UnitySharedTexture;
 
     switch(UnityGraphics->GetRenderer())
     {
@@ -278,7 +278,7 @@ unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedText
         case kUnityGfxRendererOpenGLCore:
         {
             UnitySharedTexture->OpenGL = SharedTexture_ToOpenGL(SharedTexture);
-            NativeTex = UnitySharedTexture->OpenGL.Texture;
+            NativeTex = (void *)(intptr_t)UnitySharedTexture->OpenGL.Texture;
         } break;
     }
 
@@ -307,7 +307,7 @@ void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API DestroySharedTexture(unity_share
 
             case kUnityGfxRendererOpenGLCore:
             {
-                if (GlobalSharedTextures[i]->OpenGL.Texture != SharedTexture.NativeTex)
+                if ((void*)(intptr_t)GlobalSharedTextures[i]->OpenGL.Texture != SharedTexture.NativeTex)
                     continue;
                 SharedTexture_DestroyOpenGLTexture(GlobalSharedTextures[i]->OpenGL);
             } break;

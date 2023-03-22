@@ -82,7 +82,11 @@ static void SDL2_LogFunction(const char *Message)
 }
 
 static SDL_Window *SDL2_CreateOpenGLWindow(int32_t Width, int32_t Height)
-{    
+{
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5);
+
     uint32_t WindowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN;
     SDL_Window *Window = SDL_CreateWindow("OpenGL Window",
                                           SDL_WINDOWPOS_UNDEFINED, 

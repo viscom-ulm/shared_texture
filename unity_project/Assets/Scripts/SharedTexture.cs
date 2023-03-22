@@ -30,7 +30,13 @@ public class SharedTexture
     [DllImport("shared_texture")]
     private static extern void DestroySharedTexture(SharedTextureStruct sharedTexture);
 
-    private SharedTextureStruct sharedTexture;
+    [RuntimeInitializeOnLoadMethod]
+    private static void Initialize()
+    {        
+        // GL.IssuePluginEvent()
+    }
+
+private SharedTextureStruct sharedTexture;
     public Texture2D texture;
 
     private TextureFormat ToUnityTextureFormat(SharedTextureFormat format)

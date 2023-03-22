@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <malloc.h>
+#include <assert.h>
 
 typedef enum shared_texture_format
 {
@@ -125,7 +126,7 @@ static GLuint SharedTexture_ToOpenGLFormat(shared_texture_format Format)
         case SHARED_TEXTURE_RGBA8: return GL_RGBA8;
         case SHARED_TEXTURE_DEPTH: return GL_DEPTH_COMPONENT32F;
     }
-    return VK_FORMAT_UNDEFINED;
+    return 0;
 }
 
 static gl_shared_texture SharedTexture_ToOpenGL(shared_texture SharedTexture)

@@ -100,7 +100,7 @@ static bool OpenGL_Init(gl_state *GL, gl_load_function LoadFunction, gl_log_func
     glEnable(GL_DEBUG_OUTPUT);
     glDebugMessageCallback(OpenGL_DebugCallback, GL);
 
-    GL->SharedTexture = SharedTexture_OpenOrCreate("demo", 1280, 720, SHARED_TEXTURE_RGBA8);
+    GL->SharedTexture = SharedTexture_OpenOrCreate("demo", 128, 72, SHARED_TEXTURE_RGBA8);
     GL->GLSharedTexture = SharedTexture_ToOpenGL(GL->SharedTexture);
 
     glGenFramebuffers(1, &GL->Framebuffer);
@@ -161,7 +161,7 @@ static void OpenGL_Update(gl_state *GL, int32_t Width, int32_t Height, float Del
 {
     GL->Time += Delta;
 
-    if (SharedTexture_OpenGLWait(GL->GLSharedTexture))
+    //if (SharedTexture_OpenGLWait(GL->GLSharedTexture))
     {
         // DRAW TO SHARED TEXTURE
         glViewport(0, 0, GL->SharedTexture.Width, GL->SharedTexture.Height);
@@ -174,7 +174,7 @@ static void OpenGL_Update(gl_state *GL, int32_t Width, int32_t Height, float Del
         glUniform1i(3, GL->SharedTexture.Height);
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
-        SharedTexture_OpenGLSignal(GL->GLSharedTexture);
+        //SharedTexture_OpenGLSignal(GL->GLSharedTexture);
     }
 
     // BLIT TO OPENGL WINDOW
