@@ -19,6 +19,7 @@ typedef struct unity_shared_texture_internal
 } unity_shared_texture_internal;
 
 static uint32_t GlobalSharedTextureCount = 0;
+static uint32_t GlobalSharedTextureCapacity = 0;
 static unity_shared_texture_internal **GlobalSharedTextures = NULL;
 
 //
@@ -207,10 +208,13 @@ static void UNITY_INTERFACE_API Unity_OnGraphicsDeviceEvent(UnityGfxDeviceEventT
             } break;
         }
 
-        if (GlobalSharedTextureCount)
+        if (GlobalSharedTextureCapacity)
         {
-            for (uint32_t i = 0; i < GlobalSharedTextureCount; ++i)
+            for (uint32_t i = 0; i < GlobalSharedTextureCapacity; ++i)
             {
+                if (!GlobalSharedTextures[i])
+                    continue;
+
                 switch(UnityGraphics->GetRenderer())
                 {
                     case kUnityGfxRendererVulkan:
@@ -226,10 +230,13 @@ static void UNITY_INTERFACE_API Unity_OnGraphicsDeviceEvent(UnityGfxDeviceEventT
                     } break;
                 }
 
+                SharedTexture_Close(GlobalSharedTextures[i]->SharedTexture);
                 free(GlobalSharedTextures[i]);
+                GlobalSharedTextures[i] = 0;
             }
             free(GlobalSharedTextures);
             GlobalSharedTextureCount = 0;
+            GlobalSharedTextureCapacity = 0;
             GlobalSharedTextures = NULL;
         }
     }
@@ -267,18 +274,22 @@ unity_shared_texture UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API CreateSharedText
     shared_texture SharedTexture = SharedTexture_OpenOrCreate(Name, Width, Height, Format);
 
     int32_t Id = -1;
-    for (uint32_t i = 0; i < GlobalSharedTextureCount; ++i)
+    if (++GlobalSharedTextureCount >= GlobalSharedTextureCapacity)
     {
-        if (GlobalSharedTextures[i] == 0)
-        {
-            Id = i;
-            break;
-        }
+        Id = GlobalSharedTextureCapacity;
+        GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(unity_shared_texture_internal *) * (++GlobalSharedTextureCapacity));
+        GlobalSharedTextures[Id] = 0;
     }
-    if (Id == -1)
+    else
     {
-        Id = GlobalSharedTextureCount++;
-        GlobalSharedTextures = realloc(GlobalSharedTextures, sizeof(unity_shared_texture_internal *) * (GlobalSharedTextureCount));
+        for (uint32_t i = 0; i < GlobalSharedTextureCapacity; ++i)
+        {
+            if (GlobalSharedTextures[i] == 0)
+            {
+                Id = i;
+                break;
+            }
+        }
     }
 
     unity_shared_texture_internal *UnitySharedTexture = malloc(sizeof(unity_shared_texture_internal));
